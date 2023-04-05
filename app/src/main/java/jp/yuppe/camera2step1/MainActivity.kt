@@ -31,6 +31,7 @@ import android.util.SparseIntArray
 import android.view.Surface
 import android.view.TextureView
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -51,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraDevice: CameraDevice
     private lateinit var captureRequestBuilder: CaptureRequest.Builder
     private lateinit var cameraCaptureSession: CameraCaptureSession
+    private lateinit var imageReader: ImageReader
     private lateinit var previewSize: Size
     private lateinit var videoSize: Size
     private var shouldProceedWithOnResume: Boolean = true
@@ -75,6 +77,11 @@ class MainActivity : AppCompatActivity() {
         textureView = findViewById(R.id.texture_view)
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
+        findViewById<Button>(R.id.takePhotoButton).apply {
+            setOnClickListener {
+                takePhoto()
+            }
+        }
 
         findViewById<Button>(R.id.recordButton).apply {
             setOnClickListener {
@@ -122,8 +129,9 @@ class MainActivity : AppCompatActivity() {
             if (streamConfigurationMap != null) {
                 previewSize = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!.getOutputSizes(ImageFormat.JPEG).maxByOrNull { it.height * it.width }!!
                 videoSize = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!.getOutputSizes(MediaRecorder::class.java).maxByOrNull { it.height * it.width }!!
-                //imageReader = ImageReader.newInstance(previewSize.width, previewSize.height, ImageFormat.JPEG, 1)
-                //imageReader.setOnImageAvailableListener(onImageAvailableListener, backgroundHandler)
+
+                imageReader = ImageReader.newInstance(previewSize.width, previewSize.height, ImageFormat.JPEG, 1)
+                imageReader.setOnImageAvailableListener(onImageAvailableListener, backgroundHandler)
             }
             cameraId = id
         }
@@ -138,6 +146,13 @@ class MainActivity : AppCompatActivity() {
         return false
     }
 
+    private fun takePhoto() {
+        captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+        captureRequestBuilder.addTarget(imageReader.surface)
+        val rotation = windowManager.defaultDisplay.rotation
+        captureRequestBuilder.set(CaptureRequest.JPEG_ORIENTATION, orientations.get(rotation))
+        cameraCaptureSession.capture(captureRequestBuilder.build(), captureCallback, null)
+    }
 
     @SuppressLint("MissingPermission")
     private fun connectCamera() {
@@ -205,7 +220,7 @@ class MainActivity : AppCompatActivity() {
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
             captureRequestBuilder.addTarget(previewSurface)
 
-            cameraDevice.createCaptureSession(listOf(previewSurface/*, imageReader.surface*/), captureStateCallback, null)
+            cameraDevice.createCaptureSession(listOf(previewSurface, imageReader.surface), captureStateCallback, null)
         }
 
         override fun onDisconnected(cameraDevice: CameraDevice) {
@@ -302,20 +317,31 @@ class MainActivity : AppCompatActivity() {
             session: CameraCaptureSession,
             request: CaptureRequest,
             result: TotalCaptureResult
-        ) {
-
-        }
+        ) { }
     }
 
     /**
      * ImageAvailable Listener
      */
-    val onImageAvailableListener = object: ImageReader.OnImageAvailableListener{
+    val onImageAvailableListener = object: ImageReader.OnImageAvailableListener {
         override fun onImageAvailable(reader: ImageReader) {
             Toast.makeText(this@MainActivity, "Photo Taken!", Toast.LENGTH_SHORT).show()
             val image: Image = reader.acquireLatestImage()
+            saveImageToDisk(image)
             image.close()
         }
+    }
+    private fun saveImageToDisk(image: Image) {
+        val sdf = SimpleDateFormat("yyyy_MM_dd_HH_mm_ss_SSS", Locale.US)
+        val file = File(filesDir, "${sdf.format(Date())}.jpg")
+
+        val buffer = image.planes[0].buffer
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        val output = FileOutputStream(file)
+        output.write(bytes)
+        image.close()
+        output.close()
     }
 
     /**
